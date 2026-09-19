@@ -914,14 +914,18 @@
       <label>Montant reçu</label>
       <input type="number" id="pay-received" oninput="calcPayment()" placeholder="0" inputmode="numeric">
     </div>
-    <div class="quick-amounts">
-      <button onclick="setReceived(200)">200</button>
-      <button onclick="setReceived(500)">500</button>
-      <button onclick="setReceived(1000)">1 000</button>
-      <button onclick="setReceived(2000)">2 000</button>
-      <button onclick="setReceived(5000)">5 000</button>
-      <button onclick="setReceived(10000)">10 000</button>
-    </div>
+    <div class="quick-amounts" style="grid-template-columns: repeat(3, 1fr);">
+  <button onclick="setReceived(200)">+200</button>
+  <button onclick="setReceived(500)">+500</button>
+  <button onclick="setReceived(1000)">+1 000</button>
+  <button onclick="setReceived(2000)">+2 000</button>
+  <button onclick="setReceived(5000)">+5 000</button>
+  <button onclick="setReceived(10000)">+10 000</button>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+  <button class="btn btn-outline" style="min-height:42px;font-size:14px;" onclick="undoReceived()">⌫ Retirer</button>
+  <button class="btn btn-outline" style="min-height:42px;font-size:14px;border-color:var(--danger);color:var(--danger);" onclick="clearReceived()">🗑 Effacer</button>
+</div>
     <button class="btn btn-outline btn-sm mb-8" style="width:100%;" onclick="openAcomptePicker()">🎁 Utiliser un acompte</button>
     <div class="calc-line"><span>Entre en caisse</span><span id="pay-cashin">0 F</span></div>
     <div class="calc-line change"><span>Monnaie rendue</span><span id="pay-change">0 F</span></div>
@@ -2010,9 +2014,29 @@ function openPayment() {
   openModal('modal-payment');
 }
 
+/* ⭐ ADDITION au lieu de REMPLACEMENT */
 function setReceived(v) {
-  document.getElementById('pay-received').value = v;
+  var input = document.getElementById('pay-received');
+  var current = parseFloat(input.value) || 0;
+  input.value = current + v;
   calcPayment();
+}
+
+/* ⭐ NOUVEAU : Effacer le montant reçu */
+function clearReceived() {
+  var input = document.getElementById('pay-received');
+  input.value = '';
+  calcPayment();
+}
+
+/* ⭐ NOUVEAU : Retirer le dernier montant (backspace) */
+function undoReceived() {
+  var input = document.getElementById('pay-received');
+  var val = input.value;
+  if (val.length > 0) {
+    input.value = val.slice(0, -1);
+    calcPayment();
+  }
 }
 
 function calcPayment() {
