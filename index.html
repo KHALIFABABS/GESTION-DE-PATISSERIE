@@ -7,11 +7,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
+  <title>Pâtisserie Prestige</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <title>Pâtisserie Prestige</title>
   <style>
     :root {
       --primary: #AD1457;
@@ -698,6 +698,11 @@
     </div>
     <button class="btn" onclick="activateLicence()">Activer</button>
     <button class="btn btn-outline mt-8" id="btn-trial" onclick="startTrial()">🎁 Continuer en essai gratuit</button>
+    <div id="trial-blocked-msg" style="display:none;background:#ffebee;color:#c62828;padding:12px;border-radius:8px;font-size:12px;font-weight:600;text-align:center;margin-top:10px;line-height:1.5;">
+      🚫 <strong>Essai gratuit déjà utilisé</strong><br>
+      Cet appareil a déjà bénéficié de l'essai gratuit.<br>
+      Activez une licence pour continuer.
+    </div>
     <div class="text-muted text-center mt-12" id="lic-expiry"></div>
     <div style="margin-top:16px;text-align:center;">
       <a href="https://wa.me/221776868625?text=Bonjour%2C%20je%20souhaite%20une%20licence%20P%C3%A2tisserie%20Prestige" target="_blank" style="color:var(--primary);font-size:13px;font-weight:600;">📞 Contacter le vendeur</a>
@@ -1048,11 +1053,10 @@
 
 <script>
 /* ============================================================
-   GESTIONNAIRE PÂTISSERIE v6.2 — Mobile First (corrigé VSC)
+   GESTIONNAIRE PÂTISSERIE v6.3 — Anti-triche essai
    Préfixe localStorage : bp6_
    ============================================================ */
 
-/* ---------- CLÉ SECRÈTE (obfusquée) ---------- */
 const _k1 = [98,112,50,48,50,54];
 const _k2 = [45,100,97,107,97,114];
 const _k3 = [45,109,97,115,116,101,114];
@@ -1063,7 +1067,6 @@ const SECRET_KEY = _k1.concat(_k2, _k3, _k4, _k5).map(function(c){ return String
 const WHATSAPP_NUMBER = '221776868625';
 const LS_PREFIX = 'bp6_';
 
-/* ---------- PRODUITS PAR DÉFAUT ---------- */
 const DEFAULT_PRODUCTS = [
   { id:'p1', name:'Gâteau chocolat', emoji:'🍫', price:1500, cost:800, stock:10, cat:'Gâteaux' },
   { id:'p2', name:'Gâteau vanille', emoji:'🎂', price:1500, cost:800, stock:10, cat:'Gâteaux' },
@@ -1079,7 +1082,6 @@ const DEFAULT_PRODUCTS = [
   { id:'p12', name:'Jus de fruits', emoji:'🥤', price:600, cost:200, stock:30, cat:'Boissons' }
 ];
 
-/* ---------- ÉTAT GLOBAL ---------- */
 var products = [];
 var txs = [];
 var credits = [];
@@ -1102,6 +1104,233 @@ var deferredPrompt = null;
 var lockPin = '';
 var lockRole = 'patron';
 var selectedCat = 'Tous';
+
+/* ============================================================
+   SYSTÈME ANTI-RÉUTILISATION D'ESSAI GRATUIT (5 MARQUES + FP)
+   ============================================================ */
+
+/* --- MARQUE 1 : LocalStorage principal --- */
+function markTrialUsed_LS1(deviceId, activatedAt, expiresAt) {
+  try {
+    var data = {
+      used: true,
+      deviceId: deviceId,
+      activatedAt: activatedAt,
+      expiresAt: expiresAt,
+      markedAt: new Date().toISOString()
+    };
+    localStorage.setItem(LS_PREFIX + 'trial_used', JSON.stringify(data));
+  } catch(e) {}
+}
+
+function hasTrialBeenUsed_LS1() {
+  try {
+    var raw = localStorage.getItem(LS_PREFIX + 'trial_used');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+/* --- MARQUE 2 : LocalStorage miroir --- */
+function markTrialUsed_LS2(deviceId, activatedAt) {
+  try {
+    var data = {
+      trialUsed: true,
+      deviceId: deviceId,
+      activatedAt: activatedAt
+    };
+    localStorage.setItem(LS_PREFIX + 'trial_mirror', JSON.stringify(data));
+  } catch(e) {}
+}
+
+function hasTrialBeenUsed_LS2() {
+  try {
+    var raw = localStorage.getItem(LS_PREFIX + 'trial_mirror');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+/* --- MARQUE 3 : SessionStorage --- */
+function markTrialUsed_SS(deviceId) {
+  try {
+    sessionStorage.setItem('bp6_trial_backup', JSON.stringify({
+      used: true,
+      deviceId: deviceId,
+      at: new Date().toISOString()
+    }));
+  } catch(e) {}
+}
+
+function hasTrialBeenUsed_SS() {
+  try {
+    var raw = sessionStorage.getItem('bp6_trial_backup');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+/* --- MARQUE 4 : Cookie persistant (10 ans) --- */
+function markTrialUsed_Cookie(deviceId) {
+  try {
+    var value = encodeURIComponent(deviceId) + '|1';
+    var expires = new Date();
+    expires.setFullYear(expires.getFullYear() + 10);
+    document.cookie = 'bp6_trial_used=' + value +
+      '; expires=' + expires.toUTCString() +
+      '; path=/; SameSite=Lax';
+  } catch(e) {}
+}
+
+function hasTrialBeenUsed_Cookie() {
+  try {
+    var cookies = document.cookie.split(';');
+    for (var i = 0; i < cookies.length; i++) {
+      var c = cookies[i].trim();
+      if (c.indexOf('bp6_trial_used=') === 0) {
+        return { used: true, raw: c.substring('bp6_trial_used='.length) };
+      }
+    }
+    return null;
+  } catch(e) { return null; }
+}
+
+/* --- MARQUE 5 : IndexedDB --- */
+var TRIAL_DB_NAME = 'PrestigeAntiTrialDB';
+var TRIAL_DB_VERSION = 1;
+var TRIAL_STORE = 'trial_marks';
+
+function openTrialDB() {
+  return new Promise(function(resolve, reject) {
+    if (!window.indexedDB) { reject('no-indexeddb'); return; }
+    var req = indexedDB.open(TRIAL_DB_NAME, TRIAL_DB_VERSION);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains(TRIAL_STORE)) {
+        db.createObjectStore(TRIAL_STORE, { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = function(e) { resolve(e.target.result); };
+    req.onerror = function(e) { reject(e.target.error); };
+  });
+}
+
+function markTrialUsed_IDB(deviceId, activatedAt) {
+  return openTrialDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(TRIAL_STORE, 'readwrite');
+      var store = tx.objectStore(TRIAL_STORE);
+      store.put({
+        key: 'trial_used',
+        deviceId: deviceId,
+        activatedAt: activatedAt,
+        at: new Date().toISOString()
+      });
+      tx.oncomplete = function() { resolve(true); };
+      tx.onerror = function(e) { reject(e.target.error); };
+    });
+  }).catch(function() { return false; });
+}
+
+function hasTrialBeenUsed_IDB() {
+  return openTrialDB().then(function(db) {
+    return new Promise(function(resolve) {
+      var tx = db.transaction(TRIAL_STORE, 'readonly');
+      var store = tx.objectStore(TRIAL_STORE);
+      var req = store.get('trial_used');
+      req.onsuccess = function() { resolve(req.result || null); };
+      req.onerror = function() { resolve(null); };
+    });
+  }).catch(function() { return null; });
+}
+
+/* --- MARQUE 6 (BONUS) : Fingerprint navigateur --- */
+function getBrowserFingerprint() {
+  try {
+    var parts = [
+      navigator.userAgent || '',
+      navigator.language || '',
+      (navigator.languages || []).join(','),
+      screen.width + 'x' + screen.height,
+      screen.colorDepth || 0,
+      new Date().getTimezoneOffset(),
+      navigator.platform || '',
+      navigator.hardwareConcurrency || 0
+    ];
+    return parts.join('|');
+  } catch(e) { return 'unknown'; }
+}
+
+function getFingerprintHash() {
+  var fp = getBrowserFingerprint();
+  var hash = 0;
+  for (var i = 0; i < fp.length; i++) {
+    hash = ((hash << 5) - hash) + fp.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function markTrialUsed_FP() {
+  try {
+    localStorage.setItem(LS_PREFIX + 'fp_mark', getFingerprintHash());
+  } catch(e) {}
+}
+
+function hasTrialBeenUsed_FP() {
+  try {
+    var saved = localStorage.getItem(LS_PREFIX + 'fp_mark');
+    if (!saved) return null;
+    return { fingerprint: saved, current: getFingerprintHash(), match: saved === getFingerprintHash() };
+  } catch(e) { return null; }
+}
+
+/* ============================================================
+   VÉRIFICATION GLOBALE
+   ============================================================ */
+function checkTrialAlreadyUsed() {
+  var marks = {
+    ls1: hasTrialBeenUsed_LS1(),
+    ls2: hasTrialBeenUsed_LS2(),
+    ss: hasTrialBeenUsed_SS(),
+    cookie: hasTrialBeenUsed_Cookie(),
+    fp: hasTrialBeenUsed_FP()
+  };
+
+  var count = 0;
+  if (marks.ls1 && marks.ls1.used) count++;
+  if (marks.ls2 && marks.ls2.trialUsed) count++;
+  if (marks.ss && marks.ss.used) count++;
+  if (marks.cookie && marks.cookie.used) count++;
+  if (marks.fp && marks.fp.match) count++;
+
+  return {
+    used: count >= 1,
+    count: count,
+    details: marks
+  };
+}
+
+function checkTrialAlreadyUsedAsync() {
+  return hasTrialBeenUsed_IDB().then(function(idbMark) {
+    var result = checkTrialAlreadyUsed();
+    if (idbMark && idbMark.deviceId) {
+      result.used = true;
+      result.count = result.count + 1;
+      result.details.idb = idbMark;
+    }
+    return result;
+  });
+}
+
+function markTrialUsedEverywhere(deviceId, activatedAt, expiresAt) {
+  markTrialUsed_LS1(deviceId, activatedAt, expiresAt);
+  markTrialUsed_LS2(deviceId, activatedAt);
+  markTrialUsed_SS(deviceId);
+  markTrialUsed_Cookie(deviceId);
+  markTrialUsed_FP();
+  markTrialUsed_IDB(deviceId, activatedAt);
+}
 
 /* ============================================================
    INIT
@@ -1132,7 +1361,6 @@ function boot() {
     document.getElementById('onboarding').style.display = 'block';
   }
 
-  /* PWA install prompt */
   window.addEventListener('beforeinstallprompt', function(e) {
     e.preventDefault();
     deferredPrompt = e;
@@ -1142,7 +1370,6 @@ function boot() {
     }
   });
 
-  /* Fermeture modal au clic extérieur */
   var overlays = document.querySelectorAll('.modal-overlay');
   for (var i = 0; i < overlays.length; i++) {
     overlays[i].addEventListener('click', function(e) {
@@ -1184,7 +1411,6 @@ function generateDeviceId() {
   return id;
 }
 
-/* ---------- HASH PIN ---------- */
 function hashPin(pin) {
   var enc = new TextEncoder().encode(pin + SECRET_KEY + deviceId);
   return crypto.subtle.digest('SHA-256', enc).then(function(buf) {
@@ -1252,23 +1478,42 @@ function activateLicence() {
   });
 }
 
+/* ⭐ startTrial MODIFIÉ : vérifie les 5 marques avant d'autoriser */
 function startTrial() {
-  if (licence.type === 'trial' && licence.expiresAt) {
-    var days = getDaysRemaining(licence.expiresAt);
-    if (days <= 0) { toast('❌ Essai déjà utilisé'); return; }
-    if (days > 0) { showLockScreen(); return; }
-  }
-  if (licence.type === 'premium' && getDaysRemaining(licence.expiresAt) > 0) {
+  checkTrialAlreadyUsedAsync().then(function(check) {
+    if (check.used) {
+      toast('❌ Essai gratuit déjà utilisé sur cet appareil');
+      showLicenceModal('🚫 Essai déjà utilisé', 0, 'trial_used');
+      return;
+    }
+
+    if (licence.type === 'premium' && getDaysRemaining(licence.expiresAt) > 0) {
+      showLockScreen();
+      return;
+    }
+
+    if (licence.type === 'trial' && licence.expiresAt) {
+      var days = getDaysRemaining(licence.expiresAt);
+      if (days <= 0) {
+        toast('❌ Essai déjà utilisé');
+        showLicenceModal('🚫 Essai déjà utilisé', 0, 'trial_used');
+        return;
+      }
+      if (days > 0) { showLockScreen(); return; }
+    }
+
+    var now = new Date();
+    var expires = new Date(now.getTime() + 10*24*60*60*1000);
+    licence = { type: 'trial', activatedAt: now.toISOString(), expiresAt: expires.toISOString() };
+    saveLicence();
+
+    /* ⭐ MARQUER LES 5 MARQUES ⭐ */
+    markTrialUsedEverywhere(deviceId, now.toISOString(), expires.toISOString());
+
+    addAudit('licence', 'Essai gratuit démarré (marqué)');
     showLockScreen();
-    return;
-  }
-  var now = new Date();
-  var expires = new Date(now.getTime() + 10*24*60*60*1000);
-  licence = { type: 'trial', activatedAt: now.toISOString(), expiresAt: expires.toISOString() };
-  saveLicence();
-  addAudit('licence', 'Essai gratuit démarré');
-  showLockScreen();
-  setTimeout(function() { showLicenceModal('🎁 Essai gratuit activé', 10, 'trial'); }, 600);
+    setTimeout(function() { showLicenceModal('🎁 Essai gratuit activé', 10, 'trial'); }, 600);
+  });
 }
 
 function checkLicenceAndShow() {
@@ -1303,7 +1548,9 @@ function updateLicenceUI(reason) {
   var expiry = document.getElementById('lic-expiry');
   var input = document.getElementById('lic-input');
   var btnTrial = document.getElementById('btn-trial');
+  var blockedMsg = document.getElementById('trial-blocked-msg');
   if (btnTrial) btnTrial.style.display = 'block';
+  if (blockedMsg) blockedMsg.style.display = 'none';
 
   if (reason === 'trial_expired') {
     st.className = 'lic-status expired';
@@ -1337,6 +1584,15 @@ function updateLicenceUI(reason) {
     st.textContent = 'Aucune licence — Essai gratuit de 10 jours';
     expiry.textContent = '';
   }
+
+  /* ⭐ Vérifier les marques anti-réutilisation */
+  checkTrialAlreadyUsedAsync().then(function(check) {
+    var isTrialBlocked = check.used && (!licence.type || (licence.type === 'trial' && getDaysRemaining(licence.expiresAt) <= 0));
+    if (isTrialBlocked) {
+      if (btnTrial) btnTrial.style.display = 'none';
+      if (blockedMsg) blockedMsg.style.display = 'block';
+    }
+  });
 }
 
 function checkLicenceAlerts() {
@@ -1370,19 +1626,21 @@ function showLicenceModal(msg, days, type) {
   var overlay = document.createElement('div');
   overlay.className = 'modal-overlay show';
   overlay.id = 'modal-licence-alert';
+  var isTrialBlocked = type === 'trial_used';
   overlay.innerHTML =
     '<div class="modal" style="text-align:center;">' +
-      '<div style="font-size:52px;margin-bottom:12px;">' + (days <= 1 ? '🚨' : days <= 3 ? '⚠️' : '⏳') + '</div>' +
+      '<div style="font-size:52px;margin-bottom:12px;">' + (isTrialBlocked ? '🚫' : days <= 1 ? '🚨' : days <= 3 ? '⚠️' : '⏳') + '</div>' +
       '<h3 style="color:var(--primary);font-size:18px;margin-bottom:10px;justify-content:center;">' + msg + '</h3>' +
       '<p style="font-size:13.5px;color:var(--text-light);margin-bottom:16px;">' +
-        (type === 'trial' ? 'Activez une licence pour continuer sans interruption.' : 'Renouvelez votre licence pour éviter toute coupure.') +
+        (isTrialBlocked ? 'Cet appareil a déjà bénéficié de l\'essai gratuit. Activez une licence pour continuer à utiliser Pâtisserie Prestige.' :
+         type === 'trial' ? 'Activez une licence pour continuer sans interruption.' : 'Renouvelez votre licence pour éviter toute coupure.') +
       '</p>' +
       '<div style="background:var(--primary-light);border-radius:10px;padding:10px;margin-bottom:14px;font-family:monospace;font-size:13px;font-weight:700;color:var(--primary-dark);word-break:break-all;">' +
         deviceId +
       '</div>' +
       '<button class="btn btn-outline btn-sm mb-8" style="width:100%;" onclick="copyDeviceId()">📋 Copier mon ID</button>' +
       '<a href="https://wa.me/' + WHATSAPP_NUMBER + '?text=' + encodeURIComponent('Bonjour, licence Pâtisserie Prestige. ID: ' + deviceId) + '" target="_blank" class="btn btn-success" style="text-decoration:none;display:block;margin-bottom:8px;">📞 Contacter le vendeur</a>' +
-      '<button class="btn btn-outline" onclick="document.getElementById(\'modal-licence-alert\').remove()">Plus tard</button>' +
+      '<button class="btn btn-outline" onclick="document.getElementById(\'modal-licence-alert\').remove()">Fermer</button>' +
     '</div>';
   document.body.appendChild(overlay);
 }
@@ -1669,9 +1927,8 @@ function addToCart(id) {
     cart.push({ id: id, name: p.name, emoji: p.emoji, price: p.price, cost: p.cost, qty: 1 });
   }
   renderCart();
-  /* Vibration si supportée (vérif safe) */
   if (typeof navigator !== 'undefined' && 'vibrate' in navigator && typeof navigator.vibrate === 'function') {
-    try { navigator.vibrate(15); } catch (e) { /* ignore */ }
+    try { navigator.vibrate(15); } catch (e) { }
   }
 }
 
@@ -2716,20 +2973,43 @@ function confirmChangePin() {
 }
 
 /* ============================================================
-   RESET
+   RESET SÉCURISÉ (conserve licence + marques anti-triche)
    ============================================================ */
 function resetAll() {
   if (currentRole !== 'patron') { toast('Accès patron requis'); return; }
   askConfirm('⚠️ RÉINITIALISATION',
-    'Toutes les données seront supprimées :<br>• Produits<br>• Transactions<br>• Clients<br>• Acomptes<br>• Clôtures<br><br><strong>IRRÉVERSIBLE !</strong>',
+    'Toutes les données de gestion seront supprimées :<br>' +
+    '• Produits<br>• Transactions<br>• Clients<br>• Acomptes<br>• Clôtures<br><br>' +
+    '<strong>⚠️ Votre licence et l\'historique d\'essai seront CONSERVÉS.</strong><br><br>' +
+    'Cette action est irréversible !',
     function() {
       askConfirm('Confirmation finale',
-        'Appuyez sur <strong>Confirmer</strong> pour tout supprimer.',
+        'Appuyez sur <strong>Confirmer</strong> pour tout supprimer.<br><br>La licence actuelle sera conservée.',
         function() {
-          Object.keys(localStorage)
-            .filter(function(k) { return k.indexOf(LS_PREFIX) === 0; })
-            .forEach(function(k) { localStorage.removeItem(k); });
-          location.reload();
+          /* ⭐ Clés à SUPPRIMER (données de gestion) */
+          var keysToRemove = [
+            'products', 'txs', 'credits', 'acomptes', 'closings', 'audit',
+            'config', 'last_date', 'trial_alerted', 'install_dismissed'
+          ];
+
+          /* ⭐ Clés à CONSERVER (anti-triche) : licence, device_id, trial_used, trial_mirror, fp_mark */
+
+          keysToRemove.forEach(function(key) {
+            localStorage.removeItem(LS_PREFIX + key);
+          });
+
+          /* Vider sessionStorage SAUF le backup essai */
+          try {
+            var trialBackup = sessionStorage.getItem('bp6_trial_backup');
+            sessionStorage.clear();
+            if (trialBackup) sessionStorage.setItem('bp6_trial_backup', trialBackup);
+          } catch(e) {}
+
+          /* NE PAS toucher au cookie bp6_trial_used */
+          /* NE PAS toucher à IndexedDB */
+
+          toast('🗑️ Données de gestion supprimées. Licence conservée.');
+          setTimeout(function() { location.reload(); }, 1200);
         }, true);
     }, true);
 }
@@ -2855,23 +3135,16 @@ document.addEventListener('visibilitychange', function() {
 /* ============================================================
    SERVICE WORKER
    ============================================================ */
-/* ============================================================
-   ENREGISTREMENT DU SERVICE WORKER
-   ============================================================ */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('sw.js', { scope: './' })
       .then(function(registration) {
         console.log('[App] SW enregistré, scope:', registration.scope);
-
-        /* Détection de mise à jour disponible */
         registration.addEventListener('updatefound', function() {
           var newWorker = registration.installing;
           if (!newWorker) return;
-
           newWorker.addEventListener('statechange', function() {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              /* Nouveau contenu disponible — proposer rechargement */
               if (confirm('🔄 Une mise à jour est disponible. Recharger maintenant ?')) {
                 newWorker.postMessage({ type: 'SKIP_WAITING' });
                 setTimeout(function() { window.location.reload(); }, 300);
@@ -2879,8 +3152,6 @@ if ('serviceWorker' in navigator) {
             }
           });
         });
-
-        /* Recharger quand le SW prend le contrôle */
         var refreshing = false;
         navigator.serviceWorker.addEventListener('controllerchange', function() {
           if (refreshing) return;
@@ -2889,11 +3160,9 @@ if ('serviceWorker' in navigator) {
         });
       })
       .catch(function(err) {
-        console.warn('[App] Échec SW (normal si fichier local sans serveur):', err.message);
+        console.warn('[App] SW non enregistré (normal si file://):', err.message);
       });
   });
-} else {
-  console.warn('[App] Service Worker non supporté');
 }
 
 /* ============================================================
